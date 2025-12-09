@@ -163,6 +163,7 @@ SQLite is used for video metadata with migrations in `migrations/`:
 - [ ] Implement bulk deletion for multiple large videos instead of deleting files individually, as current method is slow.
 - [ ] Add proper rate-limiting protection to the admin web UI.
 - [ ] Test Cloudflare R2 CDN playback of media thoroughly.
+- [ ] Implement improved compression techniques and optimize bitrate calculation for efficiency and quality.
 
 ## License
 

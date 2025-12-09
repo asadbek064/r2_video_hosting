@@ -4,6 +4,7 @@ use crate::database::{
     list_videos as db_list_videos, update_video as db_update_video,
 };
 use crate::handlers::common::internal_err;
+use crate::storage::bulk_delete_from_r2;
 use crate::types::{AppState, VideoListResponse, VideoQuery};
 
 use axum::{
@@ -117,8 +118,10 @@ pub async fn delete_videos(
     for video_id in &existing_ids {
         let prefix = format!("{}/", video_id);
 
-        // List all objects with this prefix
+        // Collect all object keys with this prefix
+        let mut keys_to_delete = Vec::new();
         let mut continuation_token: Option<String> = None;
+
         match async {
             loop {
                 let list_resp = state
@@ -133,19 +136,7 @@ pub async fn delete_videos(
                 if let Some(contents) = list_resp.contents {
                     for obj in contents {
                         if let Some(key) = obj.key {
-                            // Ignore errors on individual file deletions
-                            if let Err(e) = state
-                                .s3
-                                .delete_object()
-                                .bucket(&state.config.r2.bucket)
-                                .key(&key)
-                                .send()
-                                .await
-                            {
-                                tracing::warn!("Failed to delete R2 object {}: {}", key, e);
-                            } else {
-                                info!("Deleted from R2: {}", key);
-                            }
+                            keys_to_delete.push(key);
                         }
                     }
                 }
@@ -160,9 +151,21 @@ pub async fn delete_videos(
         }
         .await
         {
-            Ok(_) => {}
+            Ok(_) => {
+                // Bulk delete all collected keys
+                if !keys_to_delete.is_empty() {
+                    match bulk_delete_from_r2(&state, keys_to_delete).await {
+                        Ok(deleted) => {
+                            info!("Bulk deleted {} objects for video {}", deleted, video_id);
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to bulk delete R2 objects for video {}: {}. Continuing with database deletion.", video_id, e);
+                        }
+                    }
+                }
+            }
             Err(e) => {
-                tracing::warn!("Failed to list/delete R2 objects for video {}: {}. Continuing with database deletion.", video_id, e);
+                tracing::warn!("Failed to list R2 objects for video {}: {}. Continuing with database deletion.", video_id, e);
             }
         }
     }

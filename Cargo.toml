@@ -3,6 +3,9 @@ name = "r2_video_hosting"
 version = "1.4.1"
 edition = "2024"
 
+[workspace.package]
+authors = ["Asadbek Karimov <contact@asadk.dev>"]
+
 [dependencies]
 axum = { version = "0.8.7", features = ["multipart"] }
 aws-sdk-s3 = { version = "1.116.0", features = ["behavior-version-latest"] }

@@ -776,7 +776,7 @@ pub async fn get_player(
         #container[data-orientation="landscape"] #video {{ width: 100%; height: auto; max-height: 100%; }}
         #loading {{ position: absolute; inset: 0; background: transparent; display: flex; flex-direction: column; gap: 12px; align-items: center; justify-content: center; color: #fff; font-size: 17px; letter-spacing: 0.3px; transition: opacity 0.25s ease, visibility 0.25s ease; z-index: 3; }}
         #loading.hide {{ opacity: 0; visibility: hidden; }}
-        .spinner {{ width: 44px; height: 44px; border: 3px solid rgba(255,255,255,0.14); border-top-color: #e50914; border-radius: 50%; animation: spin 1s linear infinite; }}
+        .spinner {{ width: 44px; height: 44px; border: 3px solid rgba(255,255,255,0.14); border-top-color: #2f63fe; border-radius: 50%; animation: spin 1s linear infinite; }}
         @keyframes spin {{ from {{ transform: rotate(0deg); }} to {{ transform: rotate(360deg); }} }}
         
         /* Custom Controls */
@@ -792,8 +792,8 @@ pub async fn get_player(
         #progress {{ flex: 100%; height: 6px; background: rgba(255,255,255,0.16); cursor: pointer; border-radius: 999px; position: relative; overflow: visible; }}
         #progressTrack {{ position: absolute; inset: 0; background: linear-gradient(90deg, rgba(255,255,255,0.08), rgba(255,255,255,0.16)); }}
         #buffered {{ position: absolute; top: 0; left: 0; height: 100%; background: rgba(255,255,255,0.35); border-radius: 999px; }}
-        #progressBar {{ position: absolute; top: 0; left: 0; height: 100%; background: #e50914; border-radius: 999px; box-shadow: 0 0 12px rgba(229,9,20,0.45); }}
-        #scrubHandle {{ position: absolute; top: 50%; width: 14px; height: 14px; background: #e50914; border-radius: 50%; transform: translate(-50%, -50%); box-shadow: 0 4px 14px rgba(229,9,20,0.45); }}
+        #progressBar {{ position: absolute; top: 0; left: 0; height: 100%; background: #2f63fe; border-radius: 999px; box-shadow: 0 0 12px rgba(47,99,254,0.45); }}
+        #scrubHandle {{ position: absolute; top: 50%; width: 14px; height: 14px; background: #2f63fe; border-radius: 50%; transform: translate(-50%, -50%); box-shadow: 0 4px 14px rgba(47,99,254,0.45); }}
         #progress:hover {{ height: 8px; }}
         .preview {{ position: absolute; bottom: 110%; left: 0; transform: translateX(-50%); background: rgba(12,12,12,0.92); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; box-shadow: 0 10px 24px rgba(0,0,0,0.55); display: none; overflow: hidden; pointer-events: none; z-index: 5; }}
         .preview.show {{ display: block; }}
@@ -810,7 +810,7 @@ pub async fn get_player(
         
         /* Volume */
         #volumeWrap {{ display: flex; align-items: center; }}
-        #volumeSlider {{ width: 0; opacity: 0; transition: all 0.2s; height: 4px; cursor: pointer; accent-color: #e50914; }}
+        #volumeSlider {{ width: 0; opacity: 0; transition: all 0.2s; height: 4px; cursor: pointer; accent-color: #2f63fe; }}
         #volumeWrap:hover #volumeSlider {{ width: 90px; opacity: 1; margin-left: 10px; }}
         
         /* Spacer */
@@ -822,7 +822,7 @@ pub async fn get_player(
         .menu.show {{ display: block; }}
         .menu-item {{ padding: 10px 16px; color: #fff; font-size: 14px; cursor: pointer; display: flex; align-items: center; gap: 8px; }}
         .menu-item:hover {{ background: rgba(255,255,255,0.08); }}
-        .menu-item.active {{ color: #e50914; }}
+        .menu-item.active {{ color: #2f63fe; }}
     </style>
 </head>
 <body>

@@ -1,8 +1,7 @@
 use crate::types::{AppState, ProgressUpdate};
 use anyhow::{Context, Result};
 use aws_sdk_s3::primitives::ByteStream;
-use aws_sdk_s3::types::CompletedMultipartUpload;
-use aws_sdk_s3::types::CompletedPart;
+use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart, Delete, ObjectIdentifier};
 use futures::stream::{self, StreamExt};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -317,4 +316,65 @@ pub async fn upload_hls_to_r2(
         .ok_or_else(|| anyhow::anyhow!("no master playlist (index.m3u8) generated"))?;
 
     Ok(playlist_key)
+}
+
+/// Delete multiple objects from R2/S3 in batches (up to 1000 per request).
+/// This is much faster than deleting objects one at a time.
+pub async fn bulk_delete_from_r2(
+    state: &AppState,
+    keys: Vec<String>,
+) -> Result<usize> {
+    if keys.is_empty() {
+        return Ok(0);
+    }
+
+    let total_keys = keys.len();
+    info!("Bulk deleting {} objects from R2", total_keys);
+
+    let mut deleted_count = 0;
+
+    // AWS S3 allows up to 1000 objects per delete_objects request
+    const BATCH_SIZE: usize = 1000;
+
+    for chunk in keys.chunks(BATCH_SIZE) {
+        let objects: Vec<ObjectIdentifier> = chunk
+            .iter()
+            .map(|key| ObjectIdentifier::builder().key(key).build().expect("Failed to build ObjectIdentifier"))
+            .collect();
+
+        let delete_request = Delete::builder()
+            .set_objects(Some(objects))
+            .build()
+            .context("Failed to build delete request")?;
+
+        match state
+            .s3
+            .delete_objects()
+            .bucket(&state.config.r2.bucket)
+            .delete(delete_request)
+            .send()
+            .await
+        {
+            Ok(response) => {
+                let batch_deleted = response.deleted().len();
+                deleted_count += batch_deleted;
+                info!("Deleted batch of {} objects ({}/{})", batch_deleted, deleted_count, total_keys);
+
+                // Log any errors from the response
+                let errors = response.errors();
+                if !errors.is_empty() {
+                    for err in errors {
+                        error!("Failed to delete {}: {:?}", err.key().unwrap_or("unknown"), err.message());
+                    }
+                }
+            }
+            Err(e) => {
+                error!("Bulk delete request failed: {}", e);
+                return Err(anyhow::anyhow!("Bulk delete failed: {}", e));
+            }
+        }
+    }
+
+    info!("Successfully deleted {}/{} objects from R2", deleted_count, total_keys);
+    Ok(deleted_count)
 }
