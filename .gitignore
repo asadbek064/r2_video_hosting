@@ -1,0 +1,6 @@
+.github
+/target
+.env
+*.db*
+webui
+config.yml

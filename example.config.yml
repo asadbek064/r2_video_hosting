@@ -1,0 +1,30 @@
+server:
+  host: "0.0.0.0"
+  port: 3000
+  secret_key: "secret change me"
+  admin_password: "password change me"
+  max_concurrent_encodes: 1
+  max_concurrent_uploads: 30
+  root_redirect_url: "http://localhost:3000/"
+
+r2:
+  endpoint: https://12345.r2.cloudflarestorage.com
+  bucket: bucket-name
+  access_key_id: 123445689
+  secret_access_key: ac625dba46a9483cb7dc4e6cc94503d373cbc_change_me
+  public_base_url: https://pub-a12345678.r2.dev
+
+video:
+  encoder: "libx264"
+
+clickhouse:
+  url: "http://localhost:8123"
+  user: "default"
+  password: ""
+  database: "default"
+
+# Supported encoders:
+# - h264_nvenc (NVIDIA GPU)
+# - h264_vaapi (AMD/Intel GPU on Linux)
+# - h264_qsv   (Intel QuickSync)
+# - libx264    (CPU)
