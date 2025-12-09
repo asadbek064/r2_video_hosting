@@ -753,13 +753,14 @@ pub async fn encode_to_hls(
 
                 cmd.arg("-c:v").arg(current_encoder.video_codec());
 
-                // Encoder specific settings
+                // Encoder specific settings - using "high" profile for better compression
+                // while maintaining browser compatibility (all modern browsers support High profile)
                 match current_encoder {
                     EncoderType::Nvenc => {
                         cmd.arg("-preset")
                             .arg("p3")
                             .arg("-profile:v")
-                            .arg("main")
+                            .arg("high")  // High profile for better quality
                             .arg("-level:v")
                             .arg("4.1")
                             .arg("-rc:v")
@@ -781,13 +782,13 @@ pub async fn encode_to_hls(
                             .arg("-rc_mode")
                             .arg("VBR")
                             .arg("-profile:v")
-                            .arg("main");
+                            .arg("high");  // High profile for better quality
                     }
                     EncoderType::Qsv => {
                         cmd.arg("-preset")
                             .arg("faster")
                             .arg("-profile:v")
-                            .arg("main")
+                            .arg("high")  // High profile for better quality
                             .arg("-look_ahead")
                             .arg("1")
                             .arg("-look_ahead_depth")
@@ -797,7 +798,7 @@ pub async fn encode_to_hls(
                         cmd.arg("-preset")
                             .arg("veryfast")
                             .arg("-profile:v")
-                            .arg("main")
+                            .arg("high")  // High profile for better quality
                             .arg("-level:v")
                             .arg("4.0");
                     }
@@ -812,8 +813,21 @@ pub async fn encode_to_hls(
                     .arg("-vf")
                     .arg(&scale_filter);
 
-                if matches!(current_encoder, EncoderType::Cpu) {
-                    cmd.arg("-pix_fmt").arg("yuv420p");
+                // Force yuv420p pixel format for web compatibility
+                // This ensures browsers can play the video (no 10-bit, no yuv444p)
+                match current_encoder {
+                    EncoderType::Nvenc => {
+                        // For NVENC, specify format after hwdownload
+                        cmd.arg("-pix_fmt").arg("yuv420p");
+                    }
+                    EncoderType::Vaapi | EncoderType::Qsv => {
+                        // Hardware encoders: force 8-bit 4:2:0
+                        cmd.arg("-pix_fmt").arg("yuv420p");
+                    }
+                    EncoderType::Cpu => {
+                        // CPU encoder: explicitly set yuv420p
+                        cmd.arg("-pix_fmt").arg("yuv420p");
+                    }
                 }
 
                 cmd.arg("-g")
@@ -937,10 +951,12 @@ pub async fn encode_to_hls(
             let _permit = semaphore.acquire().await.unwrap();
 
             // Create audio directory with language/index identifier
-            let audio_label = audio_stream
-                .language
-                .clone()
-                .unwrap_or_else(|| format!("track_{}", audio_idx));
+            // Always include track index to ensure uniqueness (handles multiple tracks with same language)
+            let audio_label = if let Some(lang) = &audio_stream.language {
+                format!("{}_{}", lang, audio_idx)
+            } else {
+                format!("track_{}", audio_idx)
+            };
             let audio_dir = out_dir.join(format!("audio_{}", audio_label));
             fs::create_dir_all(&audio_dir).await?;
             let playlist_path = audio_dir.join("index.m3u8");
@@ -1144,15 +1160,24 @@ pub async fn encode_to_hls(
     // Add audio tracks as EXT-X-MEDIA entries
     if !audio_streams.is_empty() {
         for (idx, audio) in audio_streams.iter().enumerate() {
-            let audio_label = audio
-                .language
-                .clone()
-                .unwrap_or_else(|| format!("track_{}", idx));
+            // Use same labeling logic as encoding to ensure consistency
+            let audio_label = if let Some(lang) = &audio.language {
+                format!("{}_{}", lang, idx)
+            } else {
+                format!("track_{}", idx)
+            };
             let language = audio.language.as_deref().unwrap_or("und");
             let name = audio
                 .title
                 .clone()
-                .unwrap_or_else(|| get_language_display_name(language));
+                .unwrap_or_else(|| {
+                    // For undefined/unknown languages, include track number to differentiate
+                    if language == "und" {
+                        format!("Audio Track {} ({})", idx + 1, audio.codec_name)
+                    } else {
+                        get_language_display_name(language)
+                    }
+                });
             let is_default = if audio.is_default || idx == 0 {
                 "YES"
             } else {
