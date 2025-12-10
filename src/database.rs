@@ -64,16 +64,17 @@ pub async fn save_video(
 
 #[allow(dead_code)]
 #[derive(sqlx::FromRow)]
-struct VideoRow {
-    id: String,
-    name: String,
-    tags: String,
-    available_resolutions: String,
-    duration: i64,
-    thumbnail_key: String,
-    sprites_key: Option<String>,
-    entrypoint: String,
-    created_at: String,
+pub struct VideoRow {
+    pub id: String,
+    pub name: String,
+    pub tags: String,
+    pub available_resolutions: String,
+    pub duration: i64,
+    pub thumbnail_key: String,
+    pub sprites_key: Option<String>,
+    pub entrypoint: String,
+    pub created_at: String,
+    pub is_public: i64,
 }
 
 pub async fn count_videos(db_pool: &SqlitePool, filters: &VideoQuery) -> Result<i64> {
@@ -141,7 +142,7 @@ pub async fn list_videos(
     let rows: Vec<VideoRow> = match (name.as_ref(), tag) {
          (None, None) => {
              sqlx::query_as::<_, VideoRow>(
-                 "SELECT id, name, tags, available_resolutions, duration, thumbnail_key, sprites_key, entrypoint, created_at \
+                 "SELECT id, name, tags, available_resolutions, duration, thumbnail_key, sprites_key, entrypoint, created_at, is_public \
                   FROM videos \
                   ORDER BY datetime(created_at) DESC \
                   LIMIT ? OFFSET ?",
@@ -155,7 +156,7 @@ pub async fn list_videos(
              let safe_name = name.replace("\"", "");
              let pattern = format!("name:\"{}\"*", safe_name);
              sqlx::query_as::<_, VideoRow>(
-                 "SELECT v.id, v.name, v.tags, v.available_resolutions, v.duration, v.thumbnail_key, v.sprites_key, v.entrypoint, v.created_at \
+                 "SELECT v.id, v.name, v.tags, v.available_resolutions, v.duration, v.thumbnail_key, v.sprites_key, v.entrypoint, v.created_at, v.is_public \
                   FROM videos v \
                   JOIN videos_fts f ON v.id = f.id \
                   WHERE f.videos_fts MATCH ? \
@@ -172,7 +173,7 @@ pub async fn list_videos(
              let safe_tag = tag.replace("\"", "");
              let pattern = format!("tags:\"{}\"", safe_tag);
              sqlx::query_as::<_, VideoRow>(
-                 "SELECT v.id, v.name, v.tags, v.available_resolutions, v.duration, v.thumbnail_key, v.sprites_key, v.entrypoint, v.created_at \
+                 "SELECT v.id, v.name, v.tags, v.available_resolutions, v.duration, v.thumbnail_key, v.sprites_key, v.entrypoint, v.created_at, v.is_public \
                   FROM videos v \
                   JOIN videos_fts f ON v.id = f.id \
                   WHERE f.videos_fts MATCH ? \
@@ -190,7 +191,7 @@ pub async fn list_videos(
              let safe_tag = tag.replace("\"", "");
              let pattern = format!("name:\"{}\"* AND tags:\"{}\"", safe_name, safe_tag);
              sqlx::query_as::<_, VideoRow>(
-                 "SELECT v.id, v.name, v.tags, v.available_resolutions, v.duration, v.thumbnail_key, v.sprites_key, v.entrypoint, v.created_at \
+                 "SELECT v.id, v.name, v.tags, v.available_resolutions, v.duration, v.thumbnail_key, v.sprites_key, v.entrypoint, v.created_at, v.is_public \
                   FROM videos v \
                   JOIN videos_fts f ON v.id = f.id \
                   WHERE f.videos_fts MATCH ? \
@@ -233,6 +234,7 @@ pub async fn list_videos(
             sprites_url: Some(sprites_url),
             player_url,
             created_at: row.created_at,
+            is_public: row.is_public != 0,
         });
     }
 
@@ -260,6 +262,40 @@ pub async fn update_video(
     }
 
     info!("Video updated in database: id={}, name={}", video_id, name);
+
+    Ok(())
+}
+
+pub async fn get_video(db_pool: &SqlitePool, video_id: &str) -> Result<VideoRow> {
+    let row = sqlx::query_as::<_, VideoRow>(
+        "SELECT id, name, tags, available_resolutions, duration, thumbnail_key, sprites_key, entrypoint, created_at, is_public \
+         FROM videos \
+         WHERE id = ?",
+    )
+    .bind(video_id)
+    .fetch_one(db_pool)
+    .await?;
+
+    Ok(row)
+}
+
+pub async fn update_video_visibility(
+    db_pool: &SqlitePool,
+    video_id: &str,
+    is_public: bool,
+) -> Result<()> {
+    let rows_affected = sqlx::query("UPDATE videos SET is_public = ? WHERE id = ?")
+        .bind(is_public as i64)
+        .bind(video_id)
+        .execute(db_pool)
+        .await?
+        .rows_affected();
+
+    if rows_affected == 0 {
+        anyhow::bail!("Video not found");
+    }
+
+    info!("Video visibility updated: id={}, is_public={}", video_id, is_public);
 
     Ok(())
 }

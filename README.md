@@ -84,7 +84,7 @@ mv example.config.yml config.yml
 # copy [Public Development URL] -> [public_base_url]
 # copy [S3 API] -> [endpoint]
 # Enable CORS on the bucket click [CORS Policy] paste and save
-# [{"AllowedOrigins":["http://localhost:3000"],"AllowedMethods":["GET"]}]
+# [{"AllowedOrigins":["*"],"AllowedMethods":["GET","HEAD"],"AllowedHeaders":["Range","Content-Type","Accept"],"ExposeHeaders":["Content-Length","Content-Range","Accept-Ranges"],"MaxAgeSeconds":86400}]
 
 # Go to https://dash.cloudflare.com/profile/api-tokens -> Click [Create Token]
 # copy [Access Key ID] -> [access_key_id]

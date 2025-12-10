@@ -16,6 +16,7 @@ interface Video {
   playlist_url: string | null
   player_url: string | null
   thumbnail_url: string | null
+  is_public: boolean
 }
 
 interface VideoResponse {
@@ -158,6 +159,31 @@ export default function Videos() {
 
     // Update local state
     setVideos((prev) => prev.map((v) => (v.id === id ? { ...v, name, tags } : v)))
+  }
+
+  const toggleVisibility = async (id: string, currentState: boolean) => {
+    const token = localStorage.getItem('admin_token')
+    try {
+      const res = await fetch(`/api/videos/${id}/visibility`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ is_public: !currentState })
+      })
+
+      if (!res.ok) {
+        const text = await res.text()
+        throw new Error(text || 'Failed to update visibility')
+      }
+
+      // Update local state
+      setVideos((prev) => prev.map((v) => (v.id === id ? { ...v, is_public: !currentState } : v)))
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err)
+      setError(errorMessage)
+    }
   }
 
   // Selection handlers
@@ -489,8 +515,15 @@ export default function Videos() {
                             )}
                           </div>
                         </div>
-                        <div className='font-bold max-w-[200px] truncate' title={video.name}>
-                          {video.name}
+                        <div>
+                          <div className='font-bold max-w-[200px] truncate' title={video.name}>
+                            {video.name}
+                          </div>
+                          {video.is_public && video.player_url && (
+                            <div className='text-xs text-gray-500 mt-1'>
+                              Embed: <code className='text-xs'>{window.location.origin}{video.player_url}</code>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </td>
@@ -563,6 +596,15 @@ export default function Videos() {
                               d='M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z'
                             />
                           </svg>
+                        </Button>
+                        <Button
+                          size='sm'
+                          variant={video.is_public ? 'primary' : 'ghost'}
+                          onClick={() => toggleVisibility(video.id, video.is_public)}
+                          className='btn-xs'
+                          title={video.is_public ? 'Public - Click to make private' : 'Private - Click to make public'}
+                        >
+                          {video.is_public ? '🌐 Public' : '🔒 Private'}
                         </Button>
                         {video.player_url && (
                           <Button size='sm' variant='secondary' onClick={() => copyEmbedCode(video)} className='btn-xs'>

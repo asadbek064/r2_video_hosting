@@ -3,12 +3,10 @@ use crate::handlers::common::{generate_token, internal_err, minify_js, verify_to
 use crate::types::AppState;
 
 use axum::{
-    body::Body,
     extract::{ConnectInfo, Path, Query, State},
     http::{HeaderMap, StatusCode, header},
     response::{Html, IntoResponse, Response},
 };
-use futures::StreamExt;
 use std::net::SocketAddr;
 
 #[derive(serde::Deserialize)]
@@ -22,20 +20,36 @@ pub async fn get_player(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
-    // Use the same IP extraction logic as get_hls_file for token consistency
-    let ip = headers
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|xff| xff.split(',').next().map(|s| s.trim().to_string()))
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| addr.ip().to_string());
-    let user_agent = headers
-        .get(header::USER_AGENT)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
+    // Fetch video to check if public
+    let video = match crate::database::get_video(&state.db_pool, &id).await {
+        Ok(v) => v,
+        Err(_) => return (StatusCode::NOT_FOUND, Html("Video not found".to_string())).into_response(),
+    };
 
-    // Generate token (view is now tracked on first play, not page load)
-    let token = generate_token(&id, &state.config.server.secret_key, &ip, user_agent);
+    // Build CDN base URL (public_base_url already points to the bucket)
+    let cdn_base = state.config.r2.public_base_url.trim_end_matches('/');
+
+    // Generate token only for private videos
+    let (token, playlist_url) = if video.is_public != 0 {
+        // Public video: Point directly to CDN
+        (String::new(), format!("{}/{}/index.m3u8", cdn_base, id))
+    } else {
+        // Private video: Generate token, use backend playlist endpoint
+        let ip = headers
+            .get("x-forwarded-for")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|xff| xff.split(',').next().map(|s| s.trim().to_string()))
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| addr.ip().to_string());
+        let user_agent = headers
+            .get(header::USER_AGENT)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+
+        let token = generate_token(&id, &state.config.server.secret_key, &ip, user_agent);
+        let url = format!("/hls/{}/index.m3u8?token={}", id, token);
+        (token, url)
+    };
 
     // Fetch all content data server-side to generate optimized JS
     let subtitles = get_subtitles_for_video(&state.db_pool, &id)
@@ -118,38 +132,31 @@ pub async fn get_player(
         "const chapters = [];".to_string()
     };
 
+    let thumbnail_url = format!("{}/{}/thumbnail.jpg", cdn_base, id);
+    let sprite_url = format!("{}/{}/sprites.jpg", cdn_base, id);
+
     let js_code = format!(
         r#"
         const videoId = '{video_id}';
         const token = '{token}';
+        const playlistUrl = '{playlist_url}';
         {subtitle_js}
         {fonts_js}
         {chapters_js}
-        const thumbnailUrl = '/hls/{video_id}/thumbnail.jpg';
-        const spriteUrl = '/hls/{video_id}/sprites.jpg';
+        const thumbnailUrl = '{thumbnail_url}';
+        const spriteUrl = '{sprite_url}';
         const spriteColumns = 10;
         const spriteRows = 10;
         const spriteWidth = 160;
         const spriteHeight = 90;
         let spriteInterval = 10;
-        
+
         let player = null;
         let video = null;
         let jassub = null;
         let bitmapRenderer = null;
         let currentSubtitle = null;
         let subtitlesEnabled = true;
-
-        const withToken = (uri) => {{
-            if (!token) return uri;
-            try {{
-                const url = new URL(uri, window.location.origin);
-                url.searchParams.set('token', token);
-                return url.toString();
-            }} catch (e) {{
-                return uri;
-            }}
-        }};
 
         // Subtitle type detection
         function needsJassub(codec) {{
@@ -299,17 +306,9 @@ pub async fn get_player(
                 }}
             }});
 
-            const networking = player.getNetworkingEngine();
-            if (networking) {{
-                networking.registerRequestFilter((_type, request) => {{
-                    if (!request.uris || !request.uris.length) return;
-                    request.uris = request.uris.map(withToken);
-                }});
-            }}
-
-            // Load HLS stream
+            // Load HLS stream (already has token if private, or direct CDN if public)
             try {{
-                await player.load(withToken('/hls/{video_id}/index.m3u8'));
+                await player.load(playlistUrl);
                 setLoading(false);
                 updateBufferedBar();
             }} catch (e) {{
@@ -710,9 +709,13 @@ pub async fn get_player(
         document.addEventListener('DOMContentLoaded', init);
         "#,
         video_id = id,
+        token = token,
+        playlist_url = playlist_url,
         subtitle_js = subtitle_js,
         fonts_js = fonts_js,
         chapters_js = chapters_js,
+        thumbnail_url = thumbnail_url,
+        sprite_url = sprite_url,
     );
 
     // Minify JS
@@ -872,7 +875,39 @@ pub async fn get_player(
         token, cookie_attr
     );
 
-    ([(header::SET_COOKIE, cookie)], Html(html))
+    ([(header::SET_COOKIE, cookie)], Html(html)).into_response()
+}
+
+// Helper function to rewrite playlist URLs to point to public CDN
+fn rewrite_playlist_urls(
+    playlist_content: &str,
+    base_url: &str,
+    video_id: &str,
+    current_path: &str,
+) -> String {
+    let mut lines = Vec::new();
+
+    for line in playlist_content.lines() {
+        if line.starts_with('#') || line.trim().is_empty() {
+            // Keep HLS tags and empty lines as-is
+            lines.push(line.to_string());
+        } else {
+            // This is a resource path - rewrite it
+            let full_url = if line.contains('/') {
+                // Absolute path in playlist (rare)
+                format!("{}/{}/{}", base_url, video_id, line)
+            } else if current_path.is_empty() {
+                // Master playlist level - relative path
+                format!("{}/{}/{}", base_url, video_id, line)
+            } else {
+                // Variant playlist level - relative path
+                format!("{}/{}/{}/{}", base_url, video_id, current_path, line)
+            };
+            lines.push(full_url);
+        }
+    }
+
+    lines.join("\n")
 }
 
 pub async fn get_hls_file(
@@ -884,9 +919,22 @@ pub async fn get_hls_file(
 ) -> Result<Response, (StatusCode, String)> {
     let key = format!("{}/{}", id, file);
 
-    // Verify token for HLS files (.m3u8, .ts)
-    if file.ends_with(".m3u8") || file.ends_with(".ts") {
-        // Extract token from query or Cookie header
+    // Only handle .m3u8 files now - segments should come from CDN
+    if !file.ends_with(".m3u8") {
+        // .ts segments should never reach backend - they use public CDN
+        return Err((
+            StatusCode::GONE,
+            "Video segments are now served via CDN".to_string()
+        ));
+    }
+
+    // Check if video is public
+    let video = crate::database::get_video(&state.db_pool, &id)
+        .await
+        .map_err(|_| (StatusCode::NOT_FOUND, "Video not found".to_string()))?;
+
+    // For private videos: Verify token for playlist access
+    if video.is_public == 0 {
         let mut token = query.token.unwrap_or_default();
         if token.is_empty() {
             let cookie_header = headers
@@ -903,7 +951,6 @@ pub async fn get_hls_file(
             }
         }
 
-        // Try to get the real client IP from X-Forwarded-For header
         let ip = headers
             .get("x-forwarded-for")
             .and_then(|v| v.to_str().ok())
@@ -911,7 +958,6 @@ pub async fn get_hls_file(
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| addr.ip().to_string());
 
-        // Extract User-Agent header
         let user_agent = headers
             .get(header::USER_AGENT)
             .and_then(|v| v.to_str().ok())
@@ -924,8 +970,9 @@ pub async fn get_hls_file(
             ));
         }
     }
+    // For public videos, no token verification needed!
 
-    // Fetch content from S3
+    // Fetch playlist from R2 (both public and private)
     let content = state
         .s3
         .get_object()
@@ -935,21 +982,32 @@ pub async fn get_hls_file(
         .await
         .map_err(|e| internal_err(anyhow::anyhow!(e)))?;
 
-    let reader = content.body.into_async_read();
-    let stream = tokio_util::io::ReaderStream::new(reader);
-    let body_stream = stream.map(|result| result.map_err(std::io::Error::other));
-    let body = Body::from_stream(body_stream);
+    let bytes = content.body.collect().await
+        .map_err(|e| internal_err(anyhow::anyhow!(e)))?
+        .into_bytes();
 
-    // Determine Content-Type
-    let content_type = if file.ends_with(".m3u8") {
-        "application/vnd.apple.mpegurl"
-    } else if file.ends_with(".ts") {
-        "video/mp2t"
-    } else if file.ends_with(".jpg") || file.ends_with(".jpeg") {
-        "image/jpeg"
+    let playlist_text = String::from_utf8(bytes.to_vec())
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Invalid UTF-8".to_string()))?;
+
+    // Determine current path (for relative URL resolution)
+    let current_path = if let Some(slash_pos) = file.rfind('/') {
+        &file[..slash_pos]
     } else {
-        "application/octet-stream"
+        ""
     };
 
-    Ok(([(header::CONTENT_TYPE, content_type)], body).into_response())
+    // Rewrite playlist URLs to point to public CDN (public_base_url already points to the bucket)
+    let base_url = state.config.r2.public_base_url.trim_end_matches('/');
+
+    let rewritten = rewrite_playlist_urls(
+        &playlist_text,
+        &base_url,
+        &id,
+        current_path,
+    );
+
+    Ok((
+        [(header::CONTENT_TYPE, "application/vnd.apple.mpegurl")],
+        rewritten
+    ).into_response())
 }

@@ -150,6 +150,7 @@ pub struct VideoDto {
     pub sprites_url: Option<String>,
     pub player_url: String,
     pub created_at: String,
+    pub is_public: bool,
 }
 
 #[derive(Serialize)]

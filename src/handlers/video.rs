@@ -180,3 +180,26 @@ pub async fn update_video(
 
     Ok(StatusCode::OK)
 }
+
+#[derive(serde::Deserialize)]
+pub struct UpdateVisibilityRequest {
+    pub is_public: bool,
+}
+
+pub async fn update_video_visibility(
+    State(state): State<AppState>,
+    Path(video_id): Path<String>,
+    Json(body): Json<UpdateVisibilityRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    crate::database::update_video_visibility(&state.db_pool, &video_id, body.is_public)
+        .await
+        .map_err(|e| {
+            if e.to_string().contains("Video not found") {
+                (StatusCode::NOT_FOUND, "Video not found".to_string())
+            } else {
+                internal_err(e)
+            }
+        })?;
+
+    Ok(StatusCode::OK)
+}

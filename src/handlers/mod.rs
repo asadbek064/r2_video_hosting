@@ -18,4 +18,4 @@ pub use upload::{
     CancelQueueResponse, CleanupResponse, cancel_queue, finalize_chunked_upload, get_progress, list_queues,
     upload_chunk, upload_video, cleanup_uploads,
 };
-pub use video::{delete_videos, list_videos, update_video};
+pub use video::{delete_videos, list_videos, update_video, update_video_visibility};

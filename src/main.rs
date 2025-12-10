@@ -160,6 +160,7 @@ async fn main() -> Result<()> {
         .route("/videos", get(handlers::list_videos))
         .route("/videos", delete(handlers::delete_videos))
         .route("/videos/{id}", put(handlers::update_video))
+        .route("/videos/{id}/visibility", put(handlers::update_video_visibility))
         .route("/queues", get(handlers::list_queues))
         .route("/queues/{id}", delete(handlers::cancel_queue))
         .route("/queues/cleanup", post(handlers::cleanup_uploads))
