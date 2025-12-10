@@ -28,6 +28,39 @@ use uuid::Uuid;
 // Stale upload timeout: 30 minutes of inactivity
 const STALE_UPLOAD_TIMEOUT_MS: u64 = 30 * 60 * 1000;
 
+// Supported video file extensions
+const ALLOWED_VIDEO_EXTENSIONS: &[&str] = &[
+    "mp4", "m4v",           // MP4 container
+    "mov",                  // QuickTime
+    "mkv",                  // Matroska
+    "avi",                  // AVI
+    "webm",                 // WebM
+    "flv",                  // Flash Video
+    "wmv",                  // Windows Media
+    "mpg", "mpeg",          // MPEG
+    "ts", "mts", "m2ts",    // MPEG Transport Stream
+    "3gp", "3g2",           // Mobile video
+];
+
+/// Validate video file extension
+fn validate_video_extension(filename: &str) -> Result<(), String> {
+    let extension = filename
+        .rsplit('.')
+        .next()
+        .ok_or_else(|| "File has no extension".to_string())?
+        .to_lowercase();
+
+    if ALLOWED_VIDEO_EXTENSIONS.contains(&extension.as_str()) {
+        Ok(())
+    } else {
+        Err(format!(
+            "Unsupported video format: .{}. Supported formats: {}",
+            extension,
+            ALLOWED_VIDEO_EXTENSIONS.join(", ")
+        ))
+    }
+}
+
 /// Clean up stale chunked uploads that have been inactive for too long
 async fn cleanup_stale_uploads(state: &AppState) {
     let now = now_millis();
@@ -111,6 +144,11 @@ pub async fn upload_video(
                     .file_name()
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| "upload.mp4".to_string());
+
+                // Validate file extension
+                if let Err(err) = validate_video_extension(&file_name) {
+                    return Err((StatusCode::BAD_REQUEST, err));
+                }
 
                 let tmp_dir = std::env::temp_dir();
                 let tmp_file = tmp_dir.join(format!("{}-{}", Uuid::new_v4(), file_name));
@@ -311,9 +349,11 @@ pub async fn upload_video(
             };
             update_progress(&state_clone.progress, &upload_id_clone, upload_progress).await;
 
+            info!("Starting R2 upload for video: {}", output_id);
             let prefix = format!("{}/", output_id);
             let playlist_key =
                 upload_hls_to_r2(&state_clone, &hls_dir, &prefix, Some(&upload_id_clone)).await?;
+            info!("Completed R2 upload. Master playlist key: {}", playlist_key);
 
             let thumbnail_key = format!("{}/thumbnail.jpg", output_id);
             let sprites_key = format!("{}/sprites.jpg", output_id);
@@ -667,6 +707,11 @@ pub async fn finalize_chunked_upload(
         })?
     };
 
+    // Validate file extension
+    if let Err(err) = validate_video_extension(&chunked_upload.file_name) {
+        return Err((StatusCode::BAD_REQUEST, err));
+    }
+
     if !chunked_upload.received_chunks.iter().all(|&r| r) {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -848,9 +893,11 @@ pub async fn finalize_chunked_upload(
             };
             update_progress(&state_clone.progress, &upload_id_clone, upload_progress).await;
 
+            info!("Starting R2 upload for video: {}", output_id);
             let prefix = format!("{}/", output_id);
             let playlist_key =
                 upload_hls_to_r2(&state_clone, &hls_dir, &prefix, Some(&upload_id_clone)).await?;
+            info!("Completed R2 upload. Master playlist key: {}", playlist_key);
 
             let thumbnail_key = format!("{}/thumbnail.jpg", output_id);
             let sprites_key = format!("{}/sprites.jpg", output_id);

@@ -19,6 +19,41 @@ A self-hosted video streaming platform with HLS encoding, Cloudflare R2 storage,
 - **Admin Dashboard**: Modern Next.js web interface for managing videos, uploads, and analytics.
 - **Background Processing**: Queue-based video encoding with concurrency limits for optimized performance.
 
+## Supported Video Formats
+
+The platform accepts videos in the following container formats:
+
+| Format | Extensions | Common Use Cases |
+|--------|------------|------------------|
+| **MP4** | `.mp4`, `.m4v` | Most common format, universal compatibility |
+| **QuickTime** | `.mov` | macOS/iOS recordings, professional video |
+| **Matroska** | `.mkv` | High-quality video with subtitles/chapters |
+| **AVI** | `.avi` | Legacy Windows format |
+| **WebM** | `.webm` | Web-optimized format |
+| **Flash Video** | `.flv` | Streaming video |
+| **Windows Media** | `.wmv` | Windows-native format |
+| **MPEG** | `.mpg`, `.mpeg` | DVD and broadcast video |
+| **MPEG-TS** | `.ts`, `.mts`, `.m2ts` | Broadcast and camera recordings |
+| **3GPP** | `.3gp`, `.3g2` | Mobile phone video |
+
+### Input Video Codecs Supported
+
+FFmpeg can decode virtually any video codec, including:
+- H.264/AVC, H.265/HEVC, H.266/VVC
+- VP8, VP9, AV1
+- MPEG-1, MPEG-2, MPEG-4
+- ProRes, DNxHD, DivX, Xvid
+
+### Output Format
+
+All videos are transcoded to:
+- **Video Codec**: H.264 (High Profile, Level 4.1)
+- **Audio Codec**: AAC (128kbps, stereo)
+- **Container**: HLS (HTTP Live Streaming)
+- **Delivery**: MPEG-TS segments + M3U8 playlists
+
+**Note:** Videos with metadata/timecode streams (common in professional cameras and screen recordings) are automatically handled - only the video and audio streams are encoded while metadata is safely ignored.
+
 ## Tech Stack
 
 ### Backend (Rust)
@@ -145,11 +180,15 @@ SQLite is used for video metadata with migrations in `migrations/`:
 
 ## NOTES / TODO
 
+- [ ] Test all of the Input Video Codec (some are producing unplayable playback either with Shaka Player or via FFMPEG out)
 - [x] Implement bulk deletion for multiple large videos instead of deleting files individually, as current method is slow.
 - [x] Add proper rate-limiting protection to the admin web UI.
-- [ ] Test Cloudflare R2 CDN playback of media thoroughly.
+- [x] Test Cloudflare R2 CDN playback of media thoroughly.
 - [x] Implement improved compression techniques and optimize bitrate calculation for efficiency and quality.
 - [x] Remove analytics and prep for prod
+- [x] Fix FFmpeg encoding to handle videos with timecode/data streams (explicit stream mapping with `-map 0:v:0`)
+- [x] Add proper content-type headers for HLS playlists and segments
+- [x] Implement video format validation on upload (file extension only)
 ## License
 
 [Apache License 2.0](./LICENSE)

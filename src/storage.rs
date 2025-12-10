@@ -32,15 +32,23 @@ pub async fn upload_large_file_to_r2(
     if file_size < MULTIPART_THRESHOLD {
         let body_bytes = read_file_chunked(file_path).await?;
 
-        // Set cache headers based on file type
-        let cache_control = if key.ends_with(".ts") {
-            "public, max-age=31536000, immutable"
+        // Set cache headers and content-type based on file type
+        let (cache_control, content_type) = if key.ends_with(".ts") {
+            ("public, max-age=31536000, immutable", "video/mp2t")
         } else if key.ends_with(".m3u8") {
-            "public, max-age=60"
-        } else if key.ends_with(".jpg") || key.ends_with(".jpeg") || key.ends_with(".png") {
-            "public, max-age=31536000, immutable"
+            ("public, max-age=60", "application/vnd.apple.mpegurl")
+        } else if key.ends_with(".jpg") || key.ends_with(".jpeg") {
+            ("public, max-age=31536000, immutable", "image/jpeg")
+        } else if key.ends_with(".png") {
+            ("public, max-age=31536000, immutable", "image/png")
+        } else if key.ends_with(".vtt") {
+            ("public, max-age=31536000, immutable", "text/vtt")
+        } else if key.ends_with(".ass") || key.ends_with(".ssa") {
+            ("public, max-age=31536000, immutable", "text/x-ssa")
+        } else if key.ends_with(".srt") {
+            ("public, max-age=31536000, immutable", "text/srt")
         } else {
-            "public, max-age=3600"
+            ("public, max-age=3600", "application/octet-stream")
         };
 
         state
@@ -50,6 +58,7 @@ pub async fn upload_large_file_to_r2(
             .key(key)
             .body(body_bytes.into())
             .cache_control(cache_control)
+            .content_type(content_type)
             .send()
             .await
             .with_context(|| format!("Failed to upload {}", key))?;
@@ -62,12 +71,32 @@ pub async fn upload_large_file_to_r2(
         key, file_size
     );
 
+    // Determine content-type for multipart upload
+    let content_type = if key.ends_with(".ts") {
+        "video/mp2t"
+    } else if key.ends_with(".m3u8") {
+        "application/vnd.apple.mpegurl"
+    } else if key.ends_with(".jpg") || key.ends_with(".jpeg") {
+        "image/jpeg"
+    } else if key.ends_with(".png") {
+        "image/png"
+    } else if key.ends_with(".vtt") {
+        "text/vtt"
+    } else if key.ends_with(".ass") || key.ends_with(".ssa") {
+        "text/x-ssa"
+    } else if key.ends_with(".srt") {
+        "text/srt"
+    } else {
+        "application/octet-stream"
+    };
+
     // Initiate multipart upload
     let create_response = state
         .s3
         .create_multipart_upload()
         .bucket(&state.config.r2.bucket)
         .key(key)
+        .content_type(content_type)
         .send()
         .await
         .context("Failed to initiate multipart upload")?;
@@ -274,19 +303,27 @@ pub async fn upload_hls_to_r2(
                     .await
                     .with_context(|| format!("read {:?}", path))?;
 
-                // Set cache headers based on file type
-                let cache_control = if key.ends_with(".ts") {
+                // Set cache headers and content-type based on file type
+                let (cache_control, content_type) = if key.ends_with(".ts") {
                     // Video segments: cache aggressively (1 year, immutable)
-                    "public, max-age=31536000, immutable"
+                    ("public, max-age=31536000, immutable", "video/mp2t")
                 } else if key.ends_with(".m3u8") {
                     // Playlists: cache briefly (1 minute) for updates
-                    "public, max-age=60"
-                } else if key.ends_with(".jpg") || key.ends_with(".jpeg") || key.ends_with(".png") {
+                    ("public, max-age=60", "application/vnd.apple.mpegurl")
+                } else if key.ends_with(".jpg") || key.ends_with(".jpeg") {
                     // Images: cache aggressively (1 year, immutable)
-                    "public, max-age=31536000, immutable"
+                    ("public, max-age=31536000, immutable", "image/jpeg")
+                } else if key.ends_with(".png") {
+                    ("public, max-age=31536000, immutable", "image/png")
+                } else if key.ends_with(".vtt") {
+                    ("public, max-age=31536000, immutable", "text/vtt")
+                } else if key.ends_with(".ass") || key.ends_with(".ssa") {
+                    ("public, max-age=31536000, immutable", "text/x-ssa")
+                } else if key.ends_with(".srt") {
+                    ("public, max-age=31536000, immutable", "text/srt")
                 } else {
                     // Other files: moderate caching (1 hour)
-                    "public, max-age=3600"
+                    ("public, max-age=3600", "application/octet-stream")
                 };
 
                 state
@@ -296,6 +333,7 @@ pub async fn upload_hls_to_r2(
                     .key(&key)
                     .body(body_bytes.into())
                     .cache_control(cache_control)
+                    .content_type(content_type)
                     .send()
                     .await
                     .with_context(|| format!("upload {}", key))?;

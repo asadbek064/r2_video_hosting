@@ -10,6 +10,41 @@ use tokio::sync::Semaphore;
 use tokio::{fs, process::Command};
 use tracing::{error, info, warn};
 
+/// Check if video has problematic data/timecode streams that might cause encoding issues
+pub async fn has_data_streams(input: &PathBuf) -> Result<bool> {
+    let output = Command::new("ffprobe")
+        .arg("-v")
+        .arg("error")
+        .arg("-show_entries")
+        .arg("stream=codec_type")
+        .arg("-of")
+        .arg("json")
+        .arg(input)
+        .output()
+        .await
+        .context("failed to run ffprobe")?;
+
+    if !output.status.success() {
+        anyhow::bail!("ffprobe failed");
+    }
+
+    let json_str = String::from_utf8(output.stdout)?;
+    let v: serde_json::Value = serde_json::from_str(&json_str)?;
+
+    // Check if any stream has codec_type "data"
+    if let Some(streams) = v["streams"].as_array() {
+        for stream in streams {
+            if let Some(codec_type) = stream["codec_type"].as_str() {
+                if codec_type == "data" {
+                    return Ok(true);
+                }
+            }
+        }
+    }
+
+    Ok(false)
+}
+
 pub async fn get_video_metadata(input: &PathBuf) -> Result<(u32, u32)> {
     // Using JSON output
     let output = Command::new("ffprobe")
@@ -743,6 +778,9 @@ pub async fn encode_to_hls(
 
                 cmd.arg("-i").arg(input.as_ref());
 
+                // Explicitly map only the first video stream to ignore data streams (timecode, etc.)
+                cmd.arg("-map").arg("0:v:0");
+
                 // Scaling filter
                 let scale_filter = match current_encoder {
                     EncoderType::Nvenc => format!("scale_cuda=-2:{}", variant.height),
@@ -859,9 +897,44 @@ pub async fn encode_to_hls(
                     .arg(&segment_pattern)
                     .arg(&playlist_path);
 
+                // Log the FFmpeg command for debugging
+                info!(
+                    "Running FFmpeg command for variant {}: ffmpeg {}",
+                    variant.label,
+                    cmd.as_std()
+                        .get_args()
+                        .map(|arg| format!("{:?}", arg))
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                );
+
                 let output = cmd.output().await.context("failed to run ffmpeg")?;
 
                 if output.status.success() {
+                    // Verify that segments were actually created
+                    if let Ok(mut entries) = fs::read_dir(&seg_dir).await {
+                        let mut segment_count = 0;
+                        let mut total_size = 0u64;
+                        while let Ok(Some(entry)) = entries.next_entry().await {
+                            if let Ok(metadata) = entry.metadata().await {
+                                let path = entry.path();
+                                if path.extension().and_then(|s| s.to_str()) == Some("ts") {
+                                    segment_count += 1;
+                                    total_size += metadata.len();
+                                    if metadata.len() == 0 {
+                                        error!("Empty segment file detected: {:?}", path);
+                                    }
+                                }
+                            }
+                        }
+                        info!(
+                            "Variant {} created {} segments, total size: {} bytes",
+                            variant.label, segment_count, total_size
+                        );
+                        if segment_count == 0 {
+                            error!("No segments were created for variant {}", variant.label);
+                        }
+                    }
                     break;
                 }
 
@@ -902,12 +975,14 @@ pub async fn encode_to_hls(
                     continue;
                 }
 
-                // Non-recoverable error
+                // Non-recoverable error - log full stderr for debugging
                 error!("FFmpeg failed for variant {}: {}", variant.label, stderr);
+                error!("Full FFmpeg stderr output:\n{}", stderr);
                 anyhow::bail!(
-                    "ffmpeg exited with status: {} for variant {}",
+                    "ffmpeg exited with status: {} for variant {}. Error: {}",
                     output.status,
-                    variant.label
+                    variant.label,
+                    stderr.lines().take(5).collect::<Vec<_>>().join("; ")
                 );
             }
 
@@ -1075,6 +1150,8 @@ pub async fn encode_to_hls(
             .arg(format!("{}", seek_time))
             .arg("-i")
             .arg(input_thumbnail.as_ref())
+            .arg("-map")
+            .arg("0:v:0")
             .arg("-vf")
             .arg("scale=480:-1")
             .arg("-frames:v")
@@ -1120,6 +1197,8 @@ pub async fn encode_to_hls(
             .arg("-y")
             .arg("-i")
             .arg(input_thumb.as_ref())
+            .arg("-map")
+            .arg("0:v:0")
             .arg("-vf")
             .arg(&vf_filter)
             .arg("-frames:v")

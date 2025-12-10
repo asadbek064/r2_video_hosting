@@ -302,17 +302,40 @@ pub async fn get_player(
                 streaming: {{
                     bufferingGoal: 30,
                     rebufferingGoal: 2,
-                    bufferBehind: 30
+                    bufferBehind: 30,
+                    retryParameters: {{
+                        timeout: 30000,
+                        maxAttempts: 3,
+                        baseDelay: 1000,
+                        backoffFactor: 2
+                    }}
+                }},
+                manifest: {{
+                    retryParameters: {{
+                        timeout: 30000,
+                        maxAttempts: 3,
+                        baseDelay: 1000,
+                        backoffFactor: 2
+                    }}
                 }}
+            }});
+
+            // Error handling
+            player.addEventListener('error', (event) => {{
+                console.error('Shaka Player error:', event.detail);
+                setLoading(false);
             }});
 
             // Load HLS stream (already has token if private, or direct CDN if public)
             try {{
+                setLoading(true);
                 await player.load(playlistUrl);
                 setLoading(false);
                 updateBufferedBar();
             }} catch (e) {{
                 console.error('Failed to load video:', e);
+                setLoading(false);
+                alert('Failed to load video: ' + e.message);
             }}
 
             // Shaka buffering events keep spinner in sync with buffering state
