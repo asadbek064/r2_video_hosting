@@ -31,12 +31,25 @@ pub async fn upload_large_file_to_r2(
     // For smaller files, use simple put_object but read in chunks to avoid Windows I/O limits
     if file_size < MULTIPART_THRESHOLD {
         let body_bytes = read_file_chunked(file_path).await?;
+
+        // Set cache headers based on file type
+        let cache_control = if key.ends_with(".ts") {
+            "public, max-age=31536000, immutable"
+        } else if key.ends_with(".m3u8") {
+            "public, max-age=60"
+        } else if key.ends_with(".jpg") || key.ends_with(".jpeg") || key.ends_with(".png") {
+            "public, max-age=31536000, immutable"
+        } else {
+            "public, max-age=3600"
+        };
+
         state
             .s3
             .put_object()
             .bucket(&state.config.r2.bucket)
             .key(key)
             .body(body_bytes.into())
+            .cache_control(cache_control)
             .send()
             .await
             .with_context(|| format!("Failed to upload {}", key))?;
@@ -261,12 +274,28 @@ pub async fn upload_hls_to_r2(
                     .await
                     .with_context(|| format!("read {:?}", path))?;
 
+                // Set cache headers based on file type
+                let cache_control = if key.ends_with(".ts") {
+                    // Video segments: cache aggressively (1 year, immutable)
+                    "public, max-age=31536000, immutable"
+                } else if key.ends_with(".m3u8") {
+                    // Playlists: cache briefly (1 minute) for updates
+                    "public, max-age=60"
+                } else if key.ends_with(".jpg") || key.ends_with(".jpeg") || key.ends_with(".png") {
+                    // Images: cache aggressively (1 year, immutable)
+                    "public, max-age=31536000, immutable"
+                } else {
+                    // Other files: moderate caching (1 hour)
+                    "public, max-age=3600"
+                };
+
                 state
                     .s3
                     .put_object()
                     .bucket(&state.config.r2.bucket)
                     .key(&key)
                     .body(body_bytes.into())
+                    .cache_control(cache_control)
                     .send()
                     .await
                     .with_context(|| format!("upload {}", key))?;
