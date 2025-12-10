@@ -62,12 +62,6 @@ r2:
 
 video:
   encoder: "libx264"  # or h264_nvenc, h264_vaapi, h264_qsv
-
-clickhouse:
-  url: "http://localhost:8123"
-  user: "default"
-  password: ""
-  database: "default"
 ```
 
 ## Installation
