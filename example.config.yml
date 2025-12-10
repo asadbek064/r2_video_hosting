@@ -17,12 +17,6 @@ r2:
 video:
   encoder: "libx264"
 
-clickhouse:
-  url: "http://localhost:8123"
-  user: "default"
-  password: ""
-  database: "default"
-
 # Supported encoders:
 # - h264_nvenc (NVIDIA GPU)
 # - h264_vaapi (AMD/Intel GPU on Linux)
