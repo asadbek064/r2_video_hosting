@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-r2_video_hosting is a self-hosted video streaming platform with HLS encoding, Cloudflare R2 storage, and real-time analytics. It consists of:
+r2_video_hosting is a self-hosted video streaming platform with HLS encoding and Cloudflare R2 storage. It consists of:
 
-- **Rust backend** (`src/`): Axum web server handling video processing, storage, and analytics
+- **Rust backend** (`src/`): Axum web server handling video processing and storage
 - **Next.js admin UI** (`admin-webui/`): React 19 + Next.js 16 dashboard for video management
 
 ## Development Setup
@@ -17,23 +17,6 @@ r2_video_hosting is a self-hosted video streaming platform with HLS encoding, Cl
 - FFmpeg with encoding support (libx264 minimum, NVIDIA/AMD hardware encoders optional)
 - Bun (for frontend)
 - Cloudflare R2 bucket (or S3-compatible storage)
-- ClickHouse (optional, for analytics; see setup below)
-
-### ClickHouse Setup
-
-ClickHouse is optional but required for view analytics. Start it with Docker:
-
-```bash
-# Start ClickHouse without password authentication
-docker run -d -p 8123:8123 -p 9000:9000 --name clickhouse \
-  -e CLICKHOUSE_DB=default \
-  -e CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 \
-  --ulimit nofile=262144:262144 \
-  clickhouse/clickhouse-server
-
-# If it crashes, restart with:
-docker start clickhouse
-```
 
 ### Configuration
 
@@ -54,11 +37,6 @@ r2:
 
 video:
   encoder: "libx264"  # or h264_nvenc, h264_vaapi, h264_qsv
-
-clickhouse:
-  url: "http://localhost:8123"
-  user: "default"
-  password: ""  # Empty for Docker setup above
 ```
 
 ### Running
@@ -84,9 +62,8 @@ In production, the backend serves the static frontend at `/admin-webui`.
 ### Data Flow
 
 1. **Upload**: Chunked upload API → temp storage → FFmpeg HLS encoding → parallel R2 upload
-2. **Metadata**: SQLite stores video/subtitle/chapter data; ClickHouse stores view analytics
+2. **Metadata**: SQLite stores video/subtitle/chapter/audio track data
 3. **Playback**: `/player/{id}` serves ArtPlayer with dynamic plugin loading based on video features
-4. **Analytics**: Real-time viewer tracking via SSE, historical data from ClickHouse
 
 ### Core State (AppState)
 
@@ -94,11 +71,10 @@ Located in `src/types.rs`:
 
 - `s3`: AWS SDK S3 client for R2 operations
 - `db_pool`: SQLite connection pool
-- `clickhouse`: ClickHouse client (operations use safe wrappers with timeouts)
 - `progress`: Shared HashMap tracking upload/encoding progress
-- `active_viewers`: Real-time viewer tracking per video
 - `ffmpeg_semaphore`: Limits concurrent encodes (configured via `max_concurrent_encodes`)
 - `chunked_uploads`: Tracks in-progress chunked uploads
+- `auth_rate_limiter`: In-memory IP-based rate limiter for auth protection
 
 ### Module Structure
 
@@ -108,14 +84,13 @@ src/
 ├── config.rs            # Config loading from config.yml
 ├── types.rs             # All shared types, DTOs, AppState
 ├── database.rs          # SQLite operations via sqlx
-├── clickhouse.rs        # Analytics with safe wrappers (timeouts/retries)
+├── rate_limit.rs        # Auth rate limiting (brute force protection)
 ├── video.rs             # FFmpeg operations, metadata extraction
 ├── storage.rs           # R2 upload/download operations
 └── handlers/
     ├── mod.rs           # Re-exports
     ├── upload.rs        # Upload, chunking, queue management
     ├── video.rs         # List, update, delete videos
-    ├── analytics.rs     # View tracking, realtime/history endpoints
     ├── player.rs        # HLS serving, player page
     ├── content.rs       # Subtitles, attachments, chapters
     └── common.rs        # Shared utilities
@@ -134,7 +109,7 @@ src/
 ### Frontend Architecture
 
 - **Auth**: `AuthWrapper.tsx` checks `/api/auth/check` with Bearer token from localStorage
-- **Routes**: `/` (main page), `/videos/{id}` (detail), `/analytics` (dashboard)
+- **Routes**: `/` (uploader), `/videos` (video management)
 - **State**: `UploadContext` tracks upload queue for progress display
 - **Styling**: DaisyUI 5 + Tailwind 4, wrapped in custom components (`Button.tsx`, `Input.tsx`)
 - **Dev config**: `basePath` removed in dev mode for rewrites to work; set to `/admin-webui` for production
@@ -157,15 +132,11 @@ src/
 
 - `GET /player/{id}` - Embedded player page
 - `GET /hls/{id}/{file}` - HLS segments/playlists
-- `POST /api/videos/{id}/heartbeat` - Viewer heartbeat
-- `POST /api/videos/{id}/view` - Track view
 - `GET /api/videos/{id}/subtitles` - List subtitles
 - `GET /api/videos/{id}/subtitles/{track}` - Get subtitle file
 - `GET /api/videos/{id}/attachments` - List font attachments
 - `GET /api/videos/{id}/chapters` - Get chapters
 - `GET /api/videos/{id}/audio-tracks` - List audio tracks
-- `GET /api/analytics/realtime` - SSE stream
-- `GET /api/analytics/history` - Historical views
 - `GET /api/progress/{upload_id}` - Upload progress
 
 ## Database Schema
@@ -177,9 +148,6 @@ SQLite migrations in `migrations/` (auto-run on startup):
 - **attachments**: Font files from MKV
 - **chapters**: Timeline markers
 - **audio_tracks**: Multi-audio support
-
-ClickHouse (via `clickhouse.rs`):
-- **views**: video_id, ip_address, user_agent, created_at
 
 ## Common Development Tasks
 
@@ -214,8 +182,11 @@ FFmpeg commands are built in `video.rs:encode_to_hls()`.
 
 ## Key Implementation Notes
 
-- **ClickHouse operations**: Always use `*_safe` wrappers (e.g., `insert_view_safe`) which include timeouts and won't crash the app if ClickHouse is down
+- **Security**:
+  - Auth rate limiting: 5 failed login attempts → 60 second lockout per IP
+  - CORS: Same-origin only (mirror_request mode) for production security
+  - Protected routes require Bearer token authentication
 - **Concurrency**: FFmpeg jobs are limited by semaphore; R2 uploads use tokio concurrent streams
 - **Progress tracking**: Stored in `AppState.progress`, cleaned up automatically on completion/failure
-- **Chunked uploads**: Temporary files stored in OS temp dir, cleaned up after 24h of inactivity
+- **Chunked uploads**: Temporary files stored in OS temp dir, cleaned up after 30 min of inactivity
 - **Next.js config**: Uses `basePath: '/admin-webui'` in production only; dev mode has no basePath to enable rewrites

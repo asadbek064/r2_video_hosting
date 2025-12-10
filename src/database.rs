@@ -1,7 +1,6 @@
 use crate::types::{Attachment, AudioTrack, Chapter, SubtitleTrack, VideoDto, VideoQuery};
 use anyhow::{Context, Result};
 use sqlx::{Sqlite, SqlitePool, migrate::MigrateDatabase};
-use std::collections::HashMap;
 use tracing::info;
 
 pub async fn initialize_database(database_url: &str) -> Result<SqlitePool> {
@@ -129,7 +128,6 @@ pub async fn list_videos(
     page: u32,
     page_size: u32,
     public_base_url: &str,
-    view_counts: &HashMap<String, i64>,
 ) -> Result<Vec<VideoDto>> {
     let page = if page == 0 { 1 } else { page };
     let page_size = page_size.clamp(1, 100);
@@ -225,8 +223,6 @@ pub async fn list_videos(
         // Return player URL instead of direct HLS URL
         let player_url = format!("/player/{}", row.id);
 
-        let view_count = *view_counts.get(&row.id).unwrap_or(&0);
-
         result.push(VideoDto {
             id: row.id,
             name: row.name,
@@ -236,22 +232,11 @@ pub async fn list_videos(
             thumbnail_url,
             sprites_url: Some(sprites_url),
             player_url,
-            view_count,
             created_at: row.created_at,
         });
     }
 
     Ok(result)
-}
-
-#[derive(sqlx::FromRow, serde::Serialize)]
-pub struct VideoSummary {
-    pub id: String,
-    pub name: String,
-    #[sqlx(default)]
-    pub view_count: i64,
-    pub created_at: String,
-    pub thumbnail_key: String,
 }
 
 pub async fn update_video(
@@ -328,43 +313,6 @@ pub async fn get_video_ids_with_prefix(
     Ok(ids)
 }
 
-pub async fn get_all_videos_summary(
-    db_pool: &SqlitePool,
-    view_counts: &HashMap<String, i64>,
-    limit: Option<i64>,
-) -> Result<Vec<VideoSummary>> {
-    let query = if let Some(l) = limit {
-        format!(
-            "SELECT id, name, created_at, thumbnail_key \
-         FROM videos \
-         ORDER BY datetime(created_at) DESC \
-         LIMIT {}",
-            l
-        )
-    } else {
-        "SELECT id, name, created_at, thumbnail_key \
-         FROM videos \
-         ORDER BY datetime(created_at) DESC"
-            .to_string()
-    };
-
-    let rows = sqlx::query_as::<_, VideoSummary>(&query)
-        .fetch_all(db_pool)
-        .await?;
-
-    // Update view counts from ClickHouse data
-    let rows = rows
-        .into_iter()
-        .map(|mut row| {
-            if let Some(&count) = view_counts.get(&row.id) {
-                row.view_count = count;
-            }
-            row
-        })
-        .collect();
-
-    Ok(rows)
-}
 
 // Subtitle CRUD operations
 

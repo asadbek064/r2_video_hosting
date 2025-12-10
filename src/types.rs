@@ -102,10 +102,9 @@ pub struct AppState {
     pub s3: S3Client,
     pub db_pool: SqlitePool,
     pub progress: ProgressMap,
-    pub active_viewers: Arc<RwLock<HashMap<String, HashMap<String, std::time::Instant>>>>,
     pub ffmpeg_semaphore: Arc<Semaphore>,
-    pub clickhouse: clickhouse::Client,
     pub chunked_uploads: ChunkedUploadsMap,
+    pub auth_rate_limiter: crate::rate_limit::AuthRateLimiter,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -150,7 +149,6 @@ pub struct VideoDto {
     pub thumbnail_url: String,
     pub sprites_url: Option<String>,
     pub player_url: String,
-    pub view_count: i64,
     pub created_at: String,
 }
 

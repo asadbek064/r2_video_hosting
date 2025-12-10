@@ -137,8 +137,6 @@ pub async fn get_player(
         let video = null;
         let jassub = null;
         let bitmapRenderer = null;
-        let viewTracked = false;
-        let heartbeatStarted = false;
         let currentSubtitle = null;
         let subtitlesEnabled = true;
 
@@ -402,14 +400,6 @@ pub async fn get_player(
 
             video.onplay = () => {{
                 playBtn.innerHTML = pauseIcon;
-                if (!viewTracked) {{
-                    viewTracked = true;
-                    fetch('/api/videos/{video_id}/view', {{ method: 'POST' }});
-                }}
-                if (!heartbeatStarted) {{
-                    heartbeatStarted = true;
-                    startHeartbeat();
-                }}
                 setLoading(false);
             }};
             video.onpause = () => {{ playBtn.innerHTML = playIcon; }};
@@ -707,13 +697,6 @@ pub async fn get_player(
                     }});
                 }} catch (e) {{ console.error('VobSub renderer error:', e); }}
             }}
-        }}
-
-        function startHeartbeat() {{
-            fetch('/api/videos/{video_id}/heartbeat', {{ method: 'POST' }});
-            setInterval(() => {{
-                fetch('/api/videos/{video_id}/heartbeat', {{ method: 'POST' }});
-            }}, 10000);
         }}
 
         // SVG Icons

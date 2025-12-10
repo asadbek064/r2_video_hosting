@@ -1,7 +1,6 @@
 'use client'
 
 import { useRef, FormEvent, useState } from 'react'
-import Navbar from '@/components/Navbar'
 import Button from '@/components/Button'
 import ProcessingQueues from '@/components/ProcessingQueues'
 import { useUpload, UploadItem } from '@/context/UploadContext'
@@ -153,7 +152,6 @@ export default function Home() {
             <p className='text-base-content/70 mt-1'>Upload videos to the processing queue.</p>
           </div>
         </div>
-        <Navbar />
 
         <ProcessingQueues />
 
@@ -243,7 +241,7 @@ export default function Home() {
                     onChange={handleFileChange}
                     className='absolute inset-0 w-full h-full opacity-0 cursor-pointer'
                   />
-                  <div className='flex flex-col items-center justify-center py-8 text-base-content/50'>
+                  <div className='flex flex-col items-center justify-center py-8 text-base-content/50 px-4'>
                     <svg
                       xmlns='http://www.w3.org/2000/svg'
                       width='32'

@@ -1,7 +1,8 @@
 # r2_video_hosting
 A self-hosted video streaming platform with HLS encoding, Cloudflare R2 storage, and a modern admin dashboard.
 
-> **Note:** This project was created for learning Rust and building a personal alternative to [Wistia](https://wistia.com/) or [Vimeo](https://vimeo.com/). It allows me to host marketing videos for my projects without relying on YouTube, which can be blocked in certain regions, is heavy with tracking and ads, and may remove content arbitrarily. With this setup, I get adaptive bitrate streaming on the edge, powered by Cloudflare R2 buckets.
+> **Note:** This project was created for learning Rust and for hosting **first-party video content** such as marketing pages, documentation, onboarding, and product demos. It is intended for **self-hosted website video delivery**, not as a public video hosting or social video platform. It allows me to host marketing videos for my projects without relying on YouTube, which can be blocked in certain regions, is heavy with tracking and ads, and may remove content arbitrarily.
+
 
 > **PS:** You can swap the video player for any other player the core feature of this project is generating HLS (`.m3u8`) video streams.
 
@@ -14,7 +15,6 @@ A self-hosted video streaming platform with HLS encoding, Cloudflare R2 storage,
 - **Subtitle Handling**: Extract and display ASS/SSA/SRT subtitles from MKV files using libass rendering.
 - **Chapter Support**: Read and present video chapters from container metadata.
 - **Embedded Font Extraction**: Extract fonts from MKV containers for accurate subtitle rendering.
-- **Analytics & Tracking**: Monitor viewers in real-time and maintain historical statistics via ClickHouse.
 - **Large File Uploads**: Supports chunked uploads with progress monitoring.
 - **Admin Dashboard**: Modern Next.js web interface for managing videos, uploads, and analytics.
 - **Background Processing**: Queue-based video encoding with concurrency limits for optimized performance.
@@ -39,7 +39,6 @@ A self-hosted video streaming platform with HLS encoding, Cloudflare R2 storage,
 - Rust (2024 edition)
 - FFmpeg with encoding support
 - Bun (for web UI)
-- ClickHouse (for analytics)
 
 ## Configuration
 
@@ -99,18 +98,12 @@ mv example.config.yml config.yml
 
 
 
-# Setup clickhouse
-docker run -d -p 8123:8123 -p 9000:9000 --name clickhouse clickhouse/clickhouse-server
-
-
 # Build the Rust backend
 cargo build --release
 
 # Run the server
 ./target/release/r2_video_hosting
 
-# if clickhouse crashes restart it
-docker start clickhouse
 ```
 
 ### Web UI
@@ -137,8 +130,6 @@ bun run build
 - `GET /api/videos/{id}/subtitles/{track}` - Get subtitle file
 - `GET /api/videos/{id}/attachments` - List font attachments
 - `GET /api/videos/{id}/chapters` - Get video chapters
-- `GET /api/analytics/realtime` - SSE stream for real-time viewers
-- `GET /api/analytics/history` - Historical view data
 - `GET /api/progress/{upload_id}` - Upload/encoding progress
 
 ### Protected (requires Bearer token)
@@ -161,13 +152,21 @@ SQLite is used for video metadata with migrations in `migrations/`:
 ## NOTES / TODO
 
 - [x] Implement bulk deletion for multiple large videos instead of deleting files individually, as current method is slow.
-- [ ] Add proper rate-limiting protection to the admin web UI.
+- [x] Add proper rate-limiting protection to the admin web UI.
 - [ ] Test Cloudflare R2 CDN playback of media thoroughly.
 - [x] Implement improved compression techniques and optimize bitrate calculation for efficiency and quality.
-
+- [x] Remove analytics and prep for prod
 ## License
 
 [Apache License 2.0](./LICENSE)
+
+
+## Is this legal?
+
+> _"This project can deliver **HLS video** backed by **Cloudflare R2**. According to Cloudflare’s public Terms update, customers may serve video and large files through the CDN when the content is hosted on Cloudflare services such as R2."_
+
+- [Update Terms Explanation](https://blog.cloudflare.com/updated-tos)
+- [CF Terms](https://www.cloudflare.com/terms/)
 
 ---
 _Created by Asadbek Karimov  | [contact@asadk.dev](mailto:contact@asadk.dev) | [asadk.dev](https://asadk.dev)_

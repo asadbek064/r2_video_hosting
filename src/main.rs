@@ -1,14 +1,14 @@
-mod clickhouse;
 mod config;
 mod database;
 mod handlers;
+mod rate_limit;
 mod storage;
 mod types;
 mod video;
 
 use anyhow::{Context, Result};
 use aws_sdk_s3::{Client as S3Client, config::Region};
-use axum::extract::DefaultBodyLimit;
+use axum::extract::{ConnectInfo, DefaultBodyLimit};
 use axum::{
     Router,
     extract::{Request, State},
@@ -21,7 +21,7 @@ use axum::{
 use config::Config;
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use tokio::sync::RwLock;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::{CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -30,9 +30,12 @@ use types::AppState;
 
 async fn auth_middleware(
     State(state): State<AppState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     req: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
+    let ip = addr.ip();
+
     let auth_header = req
         .headers()
         .get(header::AUTHORIZATION)
@@ -41,8 +44,19 @@ async fn auth_middleware(
     let expected_auth = format!("Bearer {}", state.config.server.admin_password);
 
     match auth_header {
-        Some(auth) if auth == expected_auth => Ok(next.run(req).await),
-        _ => Err(StatusCode::UNAUTHORIZED),
+        Some(auth) if auth == expected_auth => {
+            // Success - reset rate limit for this IP
+            state.auth_rate_limiter.reset(ip).await;
+            Ok(next.run(req).await)
+        }
+        _ => {
+            // Failed auth - check rate limit
+            if let Err(_retry_after) = state.auth_rate_limiter.check_and_increment(ip).await {
+                // Rate limited
+                return Err(StatusCode::TOO_MANY_REQUESTS);
+            }
+            Err(StatusCode::UNAUTHORIZED)
+        }
     }
 }
 
@@ -88,14 +102,22 @@ async fn main() -> Result<()> {
     let database_url = "sqlite://videos.db";
     let db_pool = database::initialize_database(database_url).await?;
 
-    let clickhouse_client = clickhouse::initialize_client(&config.clickhouse);
-    clickhouse::create_schema(&clickhouse_client, &config.clickhouse).await?;
-
     let progress = Arc::new(RwLock::new(HashMap::new()));
 
     let ffmpeg_semaphore = Arc::new(tokio::sync::Semaphore::new(
         config.server.max_concurrent_encodes,
     ));
+
+    let auth_rate_limiter = rate_limit::AuthRateLimiter::new();
+
+    // Spawn cleanup task for rate limiter
+    let limiter_clone = auth_rate_limiter.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(300)).await; // Every 5 min
+            limiter_clone.cleanup_old_entries().await;
+        }
+    });
 
     let host = config.server.host.clone();
     let port = config.server.port;
@@ -105,15 +127,12 @@ async fn main() -> Result<()> {
         s3,
         db_pool,
         progress: progress.clone(),
-        active_viewers: Arc::new(RwLock::new(HashMap::new())),
         ffmpeg_semaphore,
-        clickhouse: clickhouse_client,
         chunked_uploads: Arc::new(RwLock::new(HashMap::new())),
+        auth_rate_limiter,
     };
 
     let public_routes = Router::new()
-        .route("/videos/{id}/heartbeat", post(handlers::heartbeat))
-        .route("/videos/{id}/view", post(handlers::track_view))
         .route("/videos/{id}/subtitles", get(handlers::get_video_subtitles))
         .route(
             "/videos/{id}/subtitles/{track_with_ext}",
@@ -132,9 +151,6 @@ async fn main() -> Result<()> {
             "/videos/{id}/audio-tracks",
             get(handlers::get_video_audio_tracks),
         )
-        .route("/analytics/realtime", get(handlers::get_realtime_analytics))
-        .route("/analytics/history", get(handlers::get_analytics_history))
-        .route("/analytics/videos", get(handlers::get_analytics_videos))
         .route("/progress/{upload_id}", get(handlers::get_progress));
 
     let protected_routes = Router::new()
@@ -173,10 +189,10 @@ async fn main() -> Result<()> {
         // e.g. 1 GB body limit
         .layer(DefaultBodyLimit::max(1024 * 1024 * 1024))
         .layer(tower_http::trace::TraceLayer::new_for_http())
-        // CORS layer for development (Next.js dev server on different port)
+        // CORS layer - same-origin only for production security
         .layer(
             CorsLayer::new()
-                .allow_origin(Any)
+                .allow_origin(tower_http::cors::AllowOrigin::mirror_request())
                 .allow_methods([
                     Method::GET,
                     Method::POST,
@@ -184,8 +200,13 @@ async fn main() -> Result<()> {
                     Method::DELETE,
                     Method::OPTIONS,
                 ])
-                .allow_headers(Any)
-                .expose_headers(Any),
+                .allow_headers([
+                    header::AUTHORIZATION,
+                    header::CONTENT_TYPE,
+                    header::ACCEPT,
+                    header::HeaderName::from_static("x-upload-id"),
+                ])
+                .allow_credentials(true),
         )
         .with_state(state);
 

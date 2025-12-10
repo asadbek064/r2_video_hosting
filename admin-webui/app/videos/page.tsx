@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import Navbar from '@/components/Navbar'
 import Button from '@/components/Button'
 import Input from '@/components/Input'
 import VideoPreviewModal from '@/components/VideoPreviewModal'
@@ -17,7 +16,6 @@ interface Video {
   playlist_url: string | null
   player_url: string | null
   thumbnail_url: string | null
-  view_count: number
 }
 
 interface VideoResponse {
@@ -322,7 +320,6 @@ export default function Videos() {
             <p className='text-base-content/70 mt-1'>Manage and organize your video library.</p>
           </div>
         </div>
-          <Navbar />
 
         <form
           onSubmit={handleSearch}
@@ -508,9 +505,6 @@ export default function Videos() {
                     </td>
                     <td>
                       <div className='flex flex-col text-xs'>
-                        <span className='text-base-content/70'>
-                          <span className='font-bold text-base-content'>{video.view_count.toLocaleString()}</span> views
-                        </span>
                         <span className='text-base-content/50'>{video.available_resolutions.length} qualities</span>
                       </div>
                     </td>

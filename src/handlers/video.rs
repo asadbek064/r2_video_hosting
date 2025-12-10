@@ -1,4 +1,3 @@
-use crate::clickhouse;
 use crate::database::{
     count_videos, delete_videos as db_delete_videos, get_video_ids_with_prefix,
     list_videos as db_list_videos, update_video as db_update_video,
@@ -12,7 +11,6 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
 };
-use std::collections::HashMap;
 use tracing::info;
 
 #[derive(serde::Deserialize)]
@@ -57,25 +55,9 @@ pub async fn list_videos(
         page,
         page_size,
         &state.config.r2.public_base_url,
-        &HashMap::new(), // View counts are fetched separately from ClickHouse below
     )
     .await
     .map_err(internal_err)?;
-
-    // Uses safe version - returns empty map if ClickHouse is unavailable
-    let video_ids: Vec<String> = items.iter().map(|v| v.id.clone()).collect();
-    let view_counts = clickhouse::get_view_counts_safe(&state.clickhouse, &video_ids).await;
-
-    // Update items with view counts
-    let items = items
-        .into_iter()
-        .map(|mut v| {
-            if let Some(&count) = view_counts.get(&v.id) {
-                v.view_count = count;
-            }
-            v
-        })
-        .collect();
 
     let total_u64 = total as u64;
     let page_u64 = page as u64;
