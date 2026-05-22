@@ -1,4 +1,9 @@
 # r2_video_hosting
+
+Demo Video
+[![R2 Video Hosting Demo](https://img.youtube.com/vi/bzPcDY-pY9Y/maxresdefault.jpg)](https://ezy.ovh/r2-video-hosting-project-demo)
+
+
 A self-hosted video streaming platform with HLS encoding, Cloudflare R2 storage, and a modern admin dashboard.
 
 > **Note:** This project was created for learning Rust and for hosting **first-party video content** such as marketing pages, documentation, onboarding, and product demos. It is intended for **self-hosted website video delivery**, not as a public video hosting or social video platform. It allows me to host marketing videos for my projects without relying on YouTube, which can be blocked in certain regions, is heavy with tracking and ads, and may remove content arbitrarily.
